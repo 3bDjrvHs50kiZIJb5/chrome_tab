@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>收藏整理助手</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body class="extension-page">
+    <main class="app">
+
+      <section class="panel">
+
+        <form id="bookmark-quick-open-form" class="quick-open-form">
+          <label class="field">
+            <span>输入网址、标题或收藏夹名</span>
+            <div class="input-with-clear">
+              <input
+                id="bookmark-quick-open-input"
+                name="quickOpenKeyword"
+                type="text"
+                lang="en"
+                inputmode="latin"
+                placeholder="仅英文/数字/符号，例如 github.com、react docs"
+                autocomplete="off"
+                autocorrect="off"
+                spellcheck="false"
+              />
+              <button
+                type="button"
+                id="bookmark-quick-open-clear-btn"
+                class="input-clear-btn"
+                aria-label="清空输入"
+                title="清空输入"
+                hidden
+              >
+                ×
+              </button>
+            </div>
+          </label>
+        </form>
+        <p id="quick-open-tip" class="quick-open-tip">
+          输入后会自动匹配收藏结果，回车会优先打开最匹配的网址；如果没匹配到，会直接用 Google 搜索。
+        </p>
+        <div id="quick-open-empty" class="empty-state" hidden>
+          没有匹配到收藏网址，按回车会直接用 Google 搜索。
+        </div>
+        <div id="quick-open-list" class="quick-open-list"></div>
+      </section>
+
+
+      <section class="panel shortcut-panel">
+        <div class="section-head shortcut-head">
+          <div>
+            <span class="section-title">常用网站</span>
+          </div>
+        </div>
+        <div id="shortcut-empty" class="empty-state" hidden>
+          你的收藏夹里还没有可显示的网址。
+        </div>
+        <div id="shortcut-list" class="shortcut-list"></div>
+      </section>
+
+      <div class="compact-tools">
+        <button
+          type="button"
+          id="open-dust-modal-btn"
+          class="compact-tool-btn"
+          aria-label="整理收藏夹"
+          title="整理收藏夹"
+        >
+          <span aria-hidden="true">🗂️</span>
+        </button>
+        <button
+          type="button"
+          id="open-flip-modal-btn"
+          class="compact-tool-btn"
+          aria-label="翻牌高频网址"
+          title="翻牌高频网址"
+        >
+          <span aria-hidden="true">🔁</span>
+        </button>
+      </div>
+
+      <details class="panel panel-collapsible">
+        <summary class="section-head shortcut-head panel-toggle">
+          <div>
+            <span class="section-title">收藏夹</span>
+          </div>
+        </summary>
+        <div class="panel-collapsible-body">
+          <div id="folder-bookmark-empty" class="empty-state" hidden>
+            还没有可显示的收藏夹网址。
+          </div>
+          <div id="folder-bookmark-list" class="folder-bookmark-list"></div>
+        </div>
+      </details>
+
+      <section class="panel">
+        <div class="section-head shortcut-head">
+          <div>
+            <span class="section-title">最近关闭</span>
+          </div>
+        </div>
+        <form id="recent-tab-search-form" class="recent-tab-search-form">
+          <label class="field">
+            <div class="input-with-clear">
+              <input
+                id="recent-tab-search-input"
+                name="recentTabKeyword"
+                type="text"
+                placeholder="搜索最近关闭的标题或网址"
+                autocomplete="off"
+                autocorrect="off"
+                spellcheck="false"
+              />
+              <button
+                type="button"
+                id="recent-tab-search-clear-btn"
+                class="input-clear-btn"
+                aria-label="清空最近关闭搜索"
+                title="清空最近关闭搜索"
+                hidden
+              >
+                ×
+              </button>
+            </div>
+          </label>
+        </form>
+        <div id="recent-tab-empty" class="empty-state" hidden>
+          还没有可显示的最近关闭标签页。
+        </div>
+        <div id="recent-tab-list" class="recent-tab-list"></div>
+      </section>
+
+      
+      <p id="message" class="message" aria-live="polite"></p>
+      <div id="undo-toast" class="undo-toast" aria-live="polite" hidden>
+        <div class="undo-toast__content">
+          <p id="undo-toast-text" class="undo-toast__text"></p>
+          <p id="undo-toast-meta" class="undo-toast__meta">10 秒内可撤销</p>
+        </div>
+        <button type="button" id="undo-toast-btn" class="undo-toast__btn">撤销上一步</button>
+      </div>
+
+    </main>
+
+    
+
+    <div id="dust-modal" class="modal" hidden>
+      <div id="dust-modal-backdrop" class="modal-backdrop"></div>
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="dust-modal-title">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">整理收藏夹</p>
+            <h2 id="dust-modal-title">把不常开的收藏挪进“吃灰”</h2>
+          </div>
+          <button type="button" id="close-dust-modal-btn" class="icon-btn" aria-label="关闭">×</button>
+        </div>
+
+        <p class="modal-intro">根据收藏里最后一次打开的时间，找出很久没动过的收藏，准备挪进“吃灰”文件夹。</p>
+
+        <form id="bookmark-analyzer-form" class="stack">
+          <label class="field">
+            <span>多久没打开，算“不常访问”</span>
+            <select id="inactive-days" name="inactiveDays">
+              <option value="30">30 天</option>
+              <option value="90" selected>90 天</option>
+              <option value="180">180 天</option>
+              <option value="365">365 天</option>
+            </select>
+          </label>
+
+          <div class="inline-actions">
+            <button type="submit" class="secondary-btn">分析收藏夹</button>
+            <button type="button" id="move-dust-btn" class="dust-btn" disabled>一键移到“吃灰”</button>
+          </div>
+        </form>
+
+        <div id="analysis-empty" class="empty-state">
+          点“分析收藏夹”后，这里会列出建议挪走的收藏。
+        </div>
+        <div id="analysis-summary" class="analysis-summary"></div>
+        <div id="analysis-list" class="analysis-list"></div>
+      </section>
+    </div>
+
+    <div id="flip-modal" class="modal" hidden>
+      <div id="flip-modal-backdrop" class="modal-backdrop"></div>
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="flip-modal-title">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">翻牌高频网址</p>
+            <h2 id="flip-modal-title">把常看但没收藏的网址补进来</h2>
+          </div>
+          <button type="button" id="close-flip-modal-btn" class="icon-btn" aria-label="关闭">×</button>
+        </div>
+
+        <p class="modal-intro">点开这里后，会自动把最近常看但还没收藏的网址列出来。你改上面的筛选条件，下面也会自动刷新。</p>
+
+        <form id="frequent-history-form" class="stack">
+          <label class="field">
+            <span>统计最近多久的历史记录</span>
+            <select id="history-days" name="historyDays">
+              <option value="30">30 天</option>
+              <option value="90" selected>90 天</option>
+              <option value="180">180 天</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>至少出现多少次，才算“经常访问”</span>
+            <select id="min-visits" name="minVisits">
+              <option value="3">3 次</option>
+              <option value="5" selected>5 次</option>
+              <option value="10">10 次</option>
+              <option value="20">20 次</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>加入到哪个收藏夹</span>
+            <div class="field-action-row">
+              <select id="flip-folder-select" name="flipFolder"></select>
+            </div>
+          </label>
+
+          <div class="inline-actions">
+            <button type="button" id="save-flip-btn" class="flip-btn" disabled>加入已勾选收藏</button>
+          </div>
+        </form>
+
+        <div id="flip-empty" class="empty-state">
+          这里会自动列出值得补收藏的网址。
+        </div>
+        <div id="flip-summary" class="analysis-summary"></div>
+        <div id="flip-list" class="analysis-list"></div>
+      </section>
+    </div>
+
+    <template id="analysis-item-template">
+      <article class="analysis-item">
+        <div class="analysis-item__top">
+          <h3 class="analysis-title"></h3>
+          <span class="analysis-tag"></span>
+        </div>
+        <p class="analysis-url"></p>
+        <p class="analysis-meta"></p>
+        <div class="analysis-actions">
+          <button type="button" class="delete-analysis-btn">删除建议</button>
+        </div>
+      </article>
+    </template>
+
+    <template id="flip-item-template">
+      <article class="analysis-item analysis-item-check">
+        <div class="analysis-item-check__box">
+          <input type="checkbox" class="flip-checkbox" />
+        </div>
+        <div class="analysis-item-check__content">
+          <div class="analysis-item__top">
+            <h3 class="analysis-title"></h3>
+            <span class="analysis-tag"></span>
+          </div>
+          <p class="analysis-url"></p>
+          <p class="analysis-meta"></p>
+          <div class="analysis-actions">
+            <button type="button" class="delete-analysis-btn">删除建议</button>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <template id="shortcut-item-template">
+      <button type="button" class="shortcut-item" title="">
+        <span class="shortcut-icon-wrap">
+          <img class="shortcut-icon" alt="" />
+          <span class="shortcut-icon-fallback" aria-hidden="true"></span>
+        </span>
+        <span class="shortcut-name"></span>
+      </button>
+    </template>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

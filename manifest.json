@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Tab Group Launcher",
+  "description": "整理收藏夹、补充高频网址，并快速打开常用网站。",
+  "version": "1.0.0",
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "bookmarks",
+    "history",
+    "sessions",
+    "sidePanel",
+    "favicon"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Tab Group Launcher"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "minimum_chrome_version": "116"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "chrome-tab-extension-dev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:reload": "node scripts/auto-reload.mjs"
+  }
+}

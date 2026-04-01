@@ -64,6 +64,15 @@
       <div class="compact-tools">
         <button
           type="button"
+          id="refresh-extension-btn"
+          class="compact-tool-btn"
+          aria-label="刷新插件"
+          title="刷新插件"
+        >
+          <span aria-hidden="true">🔄</span>
+        </button>
+        <button
+          type="button"
           id="open-dust-modal-btn"
           class="compact-tool-btn"
           aria-label="整理收藏夹"
@@ -96,56 +105,50 @@
         </div>
       </details>
 
-      <section class="panel">
-        <div class="section-head shortcut-head">
+      <details class="panel panel-collapsible" open>
+        <summary class="section-head shortcut-head panel-toggle">
           <div>
             <span class="section-title">最近关闭</span>
           </div>
+        </summary>
+        <div class="panel-collapsible-body">
+          <form id="recent-tab-search-form" class="recent-tab-search-form">
+            <label class="field">
+              <div class="input-with-clear">
+                <input
+                  id="recent-tab-search-input"
+                  name="recentTabKeyword"
+                  type="text"
+                  placeholder="搜索最近关闭的标题或网址"
+                  autocomplete="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                />
+                <button
+                  type="button"
+                  id="recent-tab-search-clear-btn"
+                  class="input-clear-btn"
+                  aria-label="清空最近关闭搜索"
+                  title="清空最近关闭搜索"
+                  hidden
+                >
+                  ×
+                </button>
+              </div>
+            </label>
+          </form>
+          <div id="recent-tab-empty" class="empty-state" hidden>
+            还没有可显示的最近关闭标签页。
+          </div>
+          <div id="recent-tab-list" class="recent-tab-list"></div>
         </div>
-        <form id="recent-tab-search-form" class="recent-tab-search-form">
-          <label class="field">
-            <div class="input-with-clear">
-              <input
-                id="recent-tab-search-input"
-                name="recentTabKeyword"
-                type="text"
-                placeholder="搜索最近关闭的标题或网址"
-                autocomplete="off"
-                autocorrect="off"
-                spellcheck="false"
-              />
-              <button
-                type="button"
-                id="recent-tab-search-clear-btn"
-                class="input-clear-btn"
-                aria-label="清空最近关闭搜索"
-                title="清空最近关闭搜索"
-                hidden
-              >
-                ×
-              </button>
-            </div>
-          </label>
-        </form>
-        <div id="recent-tab-empty" class="empty-state" hidden>
-          还没有可显示的最近关闭标签页。
-        </div>
-        <div id="recent-tab-list" class="recent-tab-list"></div>
-      </section>
-
-      
-      <p id="message" class="message" aria-live="polite"></p>
-      <div id="undo-toast" class="undo-toast" aria-live="polite" hidden>
-        <div class="undo-toast__content">
-          <p id="undo-toast-text" class="undo-toast__text"></p>
-          <p id="undo-toast-meta" class="undo-toast__meta">10 秒内可撤销</p>
-        </div>
-        <button type="button" id="undo-toast-btn" class="undo-toast__btn">撤销上一步</button>
-      </div>
+      </details>
 
     </main>
 
-    
+    <div class="toast-stack">
+      <div id="message" class="message-stack" aria-live="polite"></div>
+    </div>
 
     <div id="dust-modal" class="modal" hidden>
       <div id="dust-modal-backdrop" class="modal-backdrop"></div>
@@ -272,13 +275,33 @@
     </template>
 
     <template id="shortcut-item-template">
-      <button type="button" class="shortcut-item" title="">
-        <span class="shortcut-icon-wrap">
-          <img class="shortcut-icon" alt="" />
-          <span class="shortcut-icon-fallback" aria-hidden="true"></span>
-        </span>
-        <span class="shortcut-name"></span>
-      </button>
+      <article class="shortcut-card" draggable="true">
+        <button type="button" class="shortcut-item" title="">
+          <span class="shortcut-icon-wrap">
+            <img class="shortcut-icon" alt="" />
+            <span class="shortcut-icon-fallback" aria-hidden="true"></span>
+          </span>
+          <span class="shortcut-name"></span>
+        </button>
+        <div class="shortcut-actions">
+          <button
+            type="button"
+            class="shortcut-action-btn shortcut-pin-btn"
+            aria-label="固定到前面"
+            title="固定到前面"
+          >
+            ★
+          </button>
+          <button
+            type="button"
+            class="shortcut-action-btn shortcut-clear-btn"
+            aria-label="从常用里清零"
+            title="从常用里清零"
+          >
+            ×
+          </button>
+        </div>
+      </article>
     </template>
 
     <script src="popup.js"></script>

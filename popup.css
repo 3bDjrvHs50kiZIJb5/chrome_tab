@@ -167,7 +167,23 @@ h1 {
   gap: 12px;
 }
 
+.shortcut-card {
+  position: relative;
+  cursor: grab;
+}
+
+.shortcut-card.is-dragging {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.shortcut-card.is-drop-target .shortcut-item {
+  border-color: var(--accent);
+  box-shadow: 0 10px 24px rgba(201, 111, 50, 0.18);
+}
+
 .shortcut-item {
+  width: 100%;
   display: grid;
   justify-items: center;
   gap: 8px;
@@ -228,6 +244,57 @@ h1 {
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.shortcut-actions {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.shortcut-card:hover .shortcut-actions,
+.shortcut-card:focus-within .shortcut-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -62%);
+}
+
+.shortcut-action-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #e3d3bf;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 250, 242, 0.96);
+  color: #7d6142;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 4px 10px rgba(89, 57, 26, 0.12);
+}
+
+.shortcut-action-btn:hover {
+  background: #fff;
+}
+
+.shortcut-pin-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff8f3;
+}
+
+.shortcut-clear-btn {
+  color: var(--danger);
 }
 
 .folder-bookmark-list {
@@ -308,6 +375,10 @@ h1 {
   gap: 8px;
 }
 
+.recent-tab-item {
+  position: relative;
+}
+
 .recent-tab-search-form {
   margin-bottom: 12px;
 }
@@ -318,7 +389,7 @@ h1 {
   gap: 4px;
   border: 1px solid #e6d9c7;
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 10px 42px 10px 12px;
   background: #fffdfa;
   color: var(--text);
   text-align: left;
@@ -326,6 +397,41 @@ h1 {
 
 .recent-tab-link:hover {
   background: #fff;
+}
+
+.recent-tab-delete-btn {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #e3d3bf;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 250, 242, 0.96);
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.recent-tab-item:hover .recent-tab-delete-btn,
+.recent-tab-item:focus-within .recent-tab-delete-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.recent-tab-delete-btn:hover {
+  background: #fff;
+  transform: translateY(-50%);
 }
 
 .recent-tab-title {
@@ -700,34 +806,69 @@ button:hover {
   text-align: center;
 }
 
-.message {
-  min-height: 20px;
-  margin: 0;
-  color: var(--accent-strong);
-  font-weight: 600;
+.toast-stack {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  top: 16px;
+  z-index: 30;
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  pointer-events: none;
 }
 
-.undo-toast[hidden] {
+.toast-stack > * {
+  width: min(100%, 560px);
+}
+
+.toast[hidden] {
   display: none;
 }
 
-.undo-toast {
-  position: sticky;
-  bottom: 14px;
-  z-index: 10;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-top: 12px;
+.toast {
   padding: 12px 14px;
   border: 1px solid #d9c6af;
   border-radius: 16px;
   background: rgba(255, 250, 242, 0.98);
   box-shadow: 0 10px 30px rgba(89, 57, 26, 0.16);
+  pointer-events: auto;
+}
+
+.message-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.message {
+  margin: 0;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.message.is-error {
+  border-color: #e7b9b2;
+  background: rgba(255, 243, 240, 0.98);
+  color: var(--danger);
+}
+
+.message.is-loading {
+  border-color: #e6d0b5;
+  background: rgba(255, 248, 237, 0.98);
+  color: #8a5a29;
+}
+
+.undo-toast {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
 }
 
 .undo-toast__content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -737,23 +878,31 @@ button:hover {
 }
 
 .undo-toast__text {
+  min-width: 0;
   font-weight: 700;
   color: var(--text);
 }
 
 .undo-toast__meta {
-  margin-top: 2px;
+  flex-shrink: 0;
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .undo-toast__btn {
   flex-shrink: 0;
-  padding: 10px 14px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border-radius: 999px;
   background: var(--accent);
   color: #fff8f3;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
 }
 
 .undo-toast__btn:hover {
@@ -822,12 +971,13 @@ button:hover {
     grid-template-columns: 1fr;
   }
 
-  .undo-toast {
-    flex-direction: column;
-    align-items: stretch;
+  .toast-stack {
+    left: 12px;
+    right: 12px;
+    top: 12px;
   }
 
-  .undo-toast__btn {
-    width: 100%;
+  .undo-toast {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 }

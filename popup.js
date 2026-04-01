@@ -7,6 +7,7 @@ const recentTabSearchInput = document.getElementById("recent-tab-search-input");
 const recentTabSearchClearButton = document.getElementById("recent-tab-search-clear-btn");
 const dustModal = document.getElementById("dust-modal");
 const flipModal = document.getElementById("flip-modal");
+const refreshExtensionButton = document.getElementById("refresh-extension-btn");
 const openDustModalButton = document.getElementById("open-dust-modal-btn");
 const openFlipModalButton = document.getElementById("open-flip-modal-btn");
 const closeDustModalButton = document.getElementById("close-dust-modal-btn");
@@ -35,25 +36,29 @@ const flipEmpty = document.getElementById("flip-empty");
 const flipSummary = document.getElementById("flip-summary");
 const flipList = document.getElementById("flip-list");
 const message = document.getElementById("message");
-const undoToast = document.getElementById("undo-toast");
-const undoToastText = document.getElementById("undo-toast-text");
-const undoToastMeta = document.getElementById("undo-toast-meta");
-const undoToastButton = document.getElementById("undo-toast-btn");
 const shortcutItemTemplate = document.getElementById("shortcut-item-template");
 const analysisItemTemplate = document.getElementById("analysis-item-template");
 const flipItemTemplate = document.getElementById("flip-item-template");
 const UNDO_WINDOW_MS = 10_000;
+const SHORTCUT_PREFERENCES_KEY = "chrome-tab-shortcut-preferences-v1";
+const RECENT_TAB_DISMISSALS_KEY = "chrome-tab-recent-tab-dismissals-v1";
 
 let bookmarkCandidates = [];
 let frequentHistoryCandidates = [];
+let shortcutCandidates = [];
 let topShortcuts = [];
 let searchableBookmarks = [];
 let quickOpenMatches = [];
 let folderBookmarkGroups = [];
 let recentClosedTabs = [];
+let shortcutPreferences = loadShortcutPreferences();
+let dismissedRecentTabKeys = loadRecentTabDismissals();
+let draggedShortcutKey = "";
 let quickOpenActiveIndex = -1;
 let quickOpenImeComposing = false;
 let frequentHistoryAnalysisRequestId = 0;
+let activeLoadingToast = null;
+let activeUndoToast = null;
 let pendingUndoAction = null;
 let undoExpireTimer = null;
 let undoTickTimer = null;
@@ -79,6 +84,9 @@ if (recentTabSearchForm && recentTabSearchInput) {
 }
 historyDaysInput.addEventListener("change", handleFrequentHistoryFilterChange);
 minVisitsInput.addEventListener("change", handleFrequentHistoryFilterChange);
+if (refreshExtensionButton) {
+  refreshExtensionButton.addEventListener("click", handleRefreshExtension);
+}
 openDustModalButton.addEventListener("click", openDustModal);
 openFlipModalButton.addEventListener("click", openFlipModal);
 closeDustModalButton.addEventListener("click", closeDustModal);
@@ -88,8 +96,9 @@ flipModalBackdrop.addEventListener("click", closeFlipModal);
 moveDustButton.addEventListener("click", handleMoveDustBookmarks);
 saveFlipButton.addEventListener("click", handleSaveFlipBookmarks);
 document.addEventListener("keydown", handleModalKeydown);
-if (undoToastButton) {
-  undoToastButton.addEventListener("click", handleUndoLastAction);
+if (shortcutList) {
+  shortcutList.addEventListener("dragover", handleShortcutListDragOver);
+  shortcutList.addEventListener("drop", handleShortcutListDrop);
 }
 
 init().catch((error) => {
@@ -99,11 +108,16 @@ init().catch((error) => {
 
 async function init() {
   searchableBookmarks = await getSearchableBookmarks();
-  topShortcuts = await getTopBookmarkShortcuts();
+  await refreshShortcutData();
   folderBookmarkGroups = await getFolderBookmarkGroups();
   recentClosedTabs = await getRecentlyClosedTabs();
   await renderBookmarkFolderOptions();
   render();
+}
+
+async function refreshShortcutData() {
+  shortcutCandidates = await getShortcutCandidates();
+  topShortcuts = getTopBookmarkShortcuts(shortcutCandidates);
 }
 
 async function handleAnalyzeBookmarks(event) {
@@ -154,7 +168,7 @@ async function handleMoveDustBookmarks() {
     const movedCount = movedCandidates.length;
     bookmarkCandidates = [];
     searchableBookmarks = await getSearchableBookmarks();
-    topShortcuts = await getTopBookmarkShortcuts();
+    await refreshShortcutData();
     folderBookmarkGroups = await getFolderBookmarkGroups();
     renderAnalysis(Number.parseInt(inactiveDaysInput.value, 10));
     renderQuickOpenMatches(getQuickOpenKeyword());
@@ -182,7 +196,7 @@ async function handleMoveDustBookmarks() {
 
         bookmarkCandidates = movedCandidates;
         searchableBookmarks = await getSearchableBookmarks();
-        topShortcuts = await getTopBookmarkShortcuts();
+        await refreshShortcutData();
         folderBookmarkGroups = await getFolderBookmarkGroups();
         renderAnalysis(Number.parseInt(inactiveDaysInput.value, 10));
         renderQuickOpenMatches(getQuickOpenKeyword());
@@ -274,7 +288,7 @@ async function handleSaveFlipBookmarks() {
     const savedCount = selectedItems.length;
     frequentHistoryCandidates = frequentHistoryCandidates.filter((item) => !item.selected);
     searchableBookmarks = await getSearchableBookmarks();
-    topShortcuts = await getTopBookmarkShortcuts();
+    await refreshShortcutData();
     folderBookmarkGroups = await getFolderBookmarkGroups();
     await renderBookmarkFolderOptions();
     renderQuickOpenMatches(getQuickOpenKeyword());
@@ -467,6 +481,13 @@ function closeDustModal() {
   syncBodyScrollState();
 }
 
+function handleRefreshExtension() {
+  showMessage("正在刷新插件...");
+  window.setTimeout(() => {
+    chrome.runtime.reload();
+  }, 120);
+}
+
 async function openFlipModal() {
   await renderBookmarkFolderOptions();
   flipModal.hidden = false;
@@ -612,15 +633,28 @@ function renderShortcuts() {
 
   for (const item of topShortcuts) {
     const fragment = shortcutItemTemplate.content.cloneNode(true);
+    const card = fragment.querySelector(".shortcut-card");
     const button = fragment.querySelector(".shortcut-item");
     const icon = fragment.querySelector(".shortcut-icon");
     const iconFallback = fragment.querySelector(".shortcut-icon-fallback");
     const name = fragment.querySelector(".shortcut-name");
+    const pinButton = fragment.querySelector(".shortcut-pin-btn");
+    const clearButton = fragment.querySelector(".shortcut-clear-btn");
 
+    card.dataset.shortcutKey = item.domainKey;
+    button.draggable = false;
+    pinButton.draggable = false;
+    clearButton.draggable = false;
+    icon.draggable = false;
     button.title = item.title || item.domainLabel;
     icon.alt = `${item.title || item.domainLabel} 图标`;
     setupShortcutIcon(icon, iconFallback, item.url, item.title || item.domainLabel);
     name.textContent = item.shortLabel;
+    pinButton.classList.toggle("is-active", item.isPinned);
+    pinButton.title = item.isPinned ? "取消固定" : "固定到前面";
+    pinButton.setAttribute("aria-label", item.isPinned ? "取消固定" : "固定到前面");
+    clearButton.title = "从常用里清零";
+    clearButton.setAttribute("aria-label", "从常用里清零");
 
     button.addEventListener("click", async () => {
       try {
@@ -632,8 +666,210 @@ function renderShortcuts() {
       }
     });
 
+    pinButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      handleShortcutPinClick(item).catch((error) => {
+        console.error(error);
+        showMessage("固定常用网站失败了，请再试一次。", true);
+      });
+    });
+
+    clearButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      handleShortcutClearClick(item).catch((error) => {
+        console.error(error);
+        showMessage("清零常用网站失败了，请再试一次。", true);
+      });
+    });
+
+    card.addEventListener("dragstart", (event) => handleShortcutDragStart(event, item.domainKey));
+    card.addEventListener("dragover", handleShortcutDragOver);
+    card.addEventListener("dragleave", handleShortcutDragLeave);
+    card.addEventListener("drop", (event) => {
+      handleShortcutDrop(event, item.domainKey);
+    });
+    card.addEventListener("dragend", handleShortcutDragEnd);
+
     shortcutList.appendChild(fragment);
   }
+}
+
+async function handleShortcutPinClick(item) {
+  const snapshot = cloneShortcutPreferences(shortcutPreferences);
+  const isPinned = Boolean(shortcutPreferences.pinned[item.domainKey]);
+
+  if (isPinned) {
+    delete shortcutPreferences.pinned[item.domainKey];
+  } else {
+    shortcutPreferences.pinned[item.domainKey] = true;
+  }
+
+  saveShortcutPreferences();
+  topShortcuts = getTopBookmarkShortcuts(shortcutCandidates);
+  renderShortcuts();
+  showMessage(isPinned ? `已经取消固定：${item.shortLabel}` : `已经固定到前面：${item.shortLabel}`);
+  startUndoAction({
+    text: isPinned ? `刚刚取消固定了 ${item.shortLabel}` : `刚刚固定了 ${item.shortLabel}`,
+    async undo() {
+      restoreShortcutPreferences(snapshot);
+      return isPinned ? `已经撤销，${item.shortLabel} 又固定回前面了。` : `已经撤销，${item.shortLabel} 不再固定了。`;
+    }
+  });
+}
+
+async function handleShortcutClearClick(item) {
+  const snapshot = cloneShortcutPreferences(shortcutPreferences);
+  delete shortcutPreferences.pinned[item.domainKey];
+  shortcutPreferences.cleared[item.domainKey] = Math.max(0, item.rawVisitCount || item.visitCount || 0);
+  shortcutPreferences.order = shortcutPreferences.order.filter((key) => key !== item.domainKey);
+  saveShortcutPreferences();
+  topShortcuts = getTopBookmarkShortcuts(shortcutCandidates);
+  renderShortcuts();
+  showMessage(`已经从常用里清零：${item.shortLabel}`);
+  startUndoAction({
+    text: `刚刚把 ${item.shortLabel} 从常用里清零了`,
+    async undo() {
+      restoreShortcutPreferences(snapshot);
+      return `已经撤销，${item.shortLabel} 回到常用网站里了。`;
+    }
+  });
+}
+
+function handleShortcutDragStart(event, shortcutKey) {
+  draggedShortcutKey = shortcutKey;
+  const card = event.currentTarget;
+  if (card instanceof HTMLElement) {
+    card.classList.add("is-dragging");
+  }
+
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", shortcutKey);
+  }
+}
+
+function handleShortcutDragOver(event) {
+  event.preventDefault();
+  const card = event.currentTarget;
+  if (!(card instanceof HTMLElement) || !draggedShortcutKey) {
+    return;
+  }
+
+  shortcutList.querySelectorAll(".shortcut-card").forEach((item) => {
+    if (item !== card) {
+      item.classList.remove("is-drop-target");
+    }
+  });
+
+  if (card.dataset.shortcutKey === draggedShortcutKey) {
+    card.classList.remove("is-drop-target");
+    return;
+  }
+
+  card.classList.add("is-drop-target");
+}
+
+function handleShortcutDragLeave(event) {
+  const card = event.currentTarget;
+  if (!(card instanceof HTMLElement)) {
+    return;
+  }
+
+  card.classList.remove("is-drop-target");
+}
+
+function handleShortcutDrop(event, targetShortcutKey) {
+  event.preventDefault();
+  const card = event.currentTarget;
+  if (card instanceof HTMLElement) {
+    card.classList.remove("is-drop-target");
+  }
+
+  if (!draggedShortcutKey || draggedShortcutKey === targetShortcutKey) {
+    return;
+  }
+
+  moveShortcutToNewPosition(targetShortcutKey);
+}
+
+function handleShortcutListDragOver(event) {
+  if (!draggedShortcutKey) {
+    return;
+  }
+
+  event.preventDefault();
+}
+
+function handleShortcutListDrop(event) {
+  if (!draggedShortcutKey) {
+    return;
+  }
+
+  const targetCard = event.target instanceof Element ? event.target.closest(".shortcut-card") : null;
+  if (targetCard) {
+    return;
+  }
+
+  event.preventDefault();
+  moveShortcutToNewPosition(null);
+}
+
+function handleShortcutDragEnd(event) {
+  const card = event.currentTarget;
+  if (card instanceof HTMLElement) {
+    card.classList.remove("is-dragging");
+    card.classList.remove("is-drop-target");
+  }
+
+  clearShortcutDragState();
+}
+
+function moveShortcutToNewPosition(targetShortcutKey) {
+  const visibleKeys = topShortcuts.map((item) => item.domainKey);
+  const fromIndex = visibleKeys.indexOf(draggedShortcutKey);
+
+  if (fromIndex < 0) {
+    clearShortcutDragState();
+    return;
+  }
+
+  const reorderedKeys = [...visibleKeys];
+  const [draggedKey] = reorderedKeys.splice(fromIndex, 1);
+
+  if (!targetShortcutKey) {
+    reorderedKeys.push(draggedKey);
+  } else {
+    const targetIndex = reorderedKeys.indexOf(targetShortcutKey);
+    if (targetIndex < 0) {
+      reorderedKeys.push(draggedKey);
+    } else {
+      reorderedKeys.splice(targetIndex, 0, draggedKey);
+    }
+  }
+
+  const snapshot = cloneShortcutPreferences(shortcutPreferences);
+  applyShortcutManualOrder(reorderedKeys);
+  topShortcuts = getTopBookmarkShortcuts(shortcutCandidates);
+  renderShortcuts();
+  clearShortcutDragState();
+  showMessage("常用网站顺序已经更新。");
+  startUndoAction({
+    text: "刚刚调整了常用网站顺序",
+    async undo() {
+      restoreShortcutPreferences(snapshot);
+      return "已经撤销，常用网站顺序回到刚才的样子了。";
+    }
+  });
+}
+
+function clearShortcutDragState() {
+  draggedShortcutKey = "";
+  shortcutList.querySelectorAll(".shortcut-card").forEach((card) => {
+    card.classList.remove("is-dragging");
+    card.classList.remove("is-drop-target");
+  });
 }
 
 function renderFolderBookmarks() {
@@ -727,9 +963,19 @@ function renderRecentClosedTabs(keyword = "") {
   recentTabEmpty.hidden = true;
 
   for (const item of filteredTabs) {
+    const row = document.createElement("div");
+    row.className = "recent-tab-item";
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "recent-tab-link";
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "recent-tab-delete-btn";
+    deleteButton.setAttribute("aria-label", "删除这一条最近关闭");
+    deleteButton.title = "删除这一条";
+    deleteButton.textContent = "×";
 
     const title = document.createElement("span");
     title.className = "recent-tab-title";
@@ -763,8 +1009,37 @@ function renderRecentClosedTabs(keyword = "") {
       }
     });
 
-    recentTabList.appendChild(button);
+    deleteButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      handleDismissRecentClosedTab(item).catch((error) => {
+        console.error(error);
+        showMessage("删除最近关闭记录失败了，请再试一次。", true);
+      });
+    });
+
+    row.append(button, deleteButton);
+    recentTabList.appendChild(row);
   }
+}
+
+async function handleDismissRecentClosedTab(item) {
+  const snapshot = [...dismissedRecentTabKeys];
+  dismissedRecentTabKeys.add(item.dismissKey);
+  saveRecentTabDismissals();
+  recentClosedTabs = recentClosedTabs.filter((tab) => tab.dismissKey !== item.dismissKey);
+  renderRecentClosedTabs(getRecentTabKeyword());
+  showMessage(`已经清掉：${item.title || item.domainLabel || item.url}`);
+  startUndoAction({
+    text: `刚刚清掉了 ${item.title || item.domainLabel || "这条最近关闭"}`,
+    async undo() {
+      dismissedRecentTabKeys = new Set(snapshot);
+      saveRecentTabDismissals();
+      recentClosedTabs = await getRecentlyClosedTabs();
+      renderRecentClosedTabs(getRecentTabKeyword());
+      return `已经撤销，${item.title || item.domainLabel || item.url} 又回来了。`;
+    }
+  });
 }
 
 async function openUrlInNewTabGroup(url, groupTitle = "常用网站") {
@@ -1369,6 +1644,7 @@ async function getRecentlyClosedTabs(limit = 20) {
   const recentTabs = sessions
     .flatMap((session) => getTabsFromClosedSession(session).map((tab) => ({
       sessionId: tab.sessionId || "",
+      dismissKey: buildRecentTabDismissKey(tab, session.lastModified || 0),
       title: tab.title || "",
       url: tab.url || "",
       domainLabel: normalizeDomainKey(tab.url || "") || "网站",
@@ -1384,10 +1660,12 @@ async function getRecentlyClosedTabs(limit = 20) {
 
     const textA = (a.title || a.domainLabel || "").toLowerCase();
     const textB = (b.title || b.domainLabel || "").toLowerCase();
-    return textA.localeCompare(textB, "zh-CN");
-  });
+      return textA.localeCompare(textB, "zh-CN");
+    });
 
-  return recentTabs.slice(0, limit);
+  const availableKeys = new Set(recentTabs.map((item) => item.dismissKey));
+  pruneRecentTabDismissals(availableKeys);
+  return recentTabs.filter((item) => !dismissedRecentTabKeys.has(item.dismissKey)).slice(0, limit);
 }
 
 function findRecentClosedTabMatches(keyword) {
@@ -1410,6 +1688,18 @@ function getTabsFromClosedSession(session) {
   }
 
   return [];
+}
+
+function buildRecentTabDismissKey(tab, closedAt = 0) {
+  const sessionId = tab?.sessionId || "";
+  const normalizedUrl = normalizeComparableUrl(tab?.url || "") || tab?.url || "";
+  const title = tab?.title || "";
+
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+
+  return `tab:${closedAt}:${normalizedUrl}:${title}`;
 }
 
 async function getFolderBookmarkGroups() {
@@ -1533,7 +1823,7 @@ function isLikelyUrlInput(input) {
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+([/:?#].*)?$/i.test(text);
 }
 
-async function getTopBookmarkShortcuts(limit = 16) {
+async function getShortcutCandidates() {
   const tree = await chrome.bookmarks.getTree();
   const bookmarks = [];
   collectBookmarkNodes(tree, bookmarks);
@@ -1544,13 +1834,14 @@ async function getTopBookmarkShortcuts(limit = 16) {
     .filter((bookmark) => !bookmark.inDustFolder)
     .filter((bookmark) => !isSpecialBookmarkFolder(bookmark))
     .map((bookmark) => {
-      const domainLabel = normalizeDomainKey(bookmark.url) || "网站";
       const normalizedUrl = normalizeComparableUrl(bookmark.url);
+      const domainKey = normalizeDomainKey(bookmark.url) || normalizedUrl || bookmark.url;
       const usage = normalizedUrl ? usageMap.get(normalizedUrl) : null;
       return {
-        title: bookmark.title || domainLabel,
-        shortLabel: buildShortcutLabel(bookmark.title || domainLabel),
-        domainLabel,
+        title: bookmark.title || domainKey,
+        shortLabel: buildShortcutLabel(bookmark.title || domainKey),
+        domainLabel: domainKey,
+        domainKey,
         folderLabel: bookmark.folderLabel || "",
         url: bookmark.url,
         visitCount: usage?.visitCount || 0,
@@ -1559,35 +1850,241 @@ async function getTopBookmarkShortcuts(limit = 16) {
       };
     });
 
-  shortcuts.sort((a, b) => {
-    if (b.visitCount !== a.visitCount) {
-      return b.visitCount - a.visitCount;
-    }
-
-    if (b.lastVisitTime !== a.lastVisitTime) {
-      return b.lastVisitTime - a.lastVisitTime;
-    }
-
-    return b.dateAdded - a.dateAdded;
-  });
+  shortcuts.sort(compareBaseShortcutScore);
 
   const uniqueShortcuts = [];
   const seenDomains = new Set();
 
   for (const item of shortcuts) {
-    if (seenDomains.has(item.domainLabel)) {
+    if (seenDomains.has(item.domainKey)) {
       continue;
     }
 
-    seenDomains.add(item.domainLabel);
+    seenDomains.add(item.domainKey);
     uniqueShortcuts.push(item);
+  }
 
-    if (uniqueShortcuts.length >= limit) {
-      break;
+  pruneShortcutPreferences(seenDomains);
+  return uniqueShortcuts;
+}
+
+function getTopBookmarkShortcuts(shortcuts, limit = 16) {
+  return shortcuts
+    .map(prepareShortcutForDisplay)
+    .filter((item) => !item.isCleared || item.isPinned)
+    .sort(comparePreparedShortcutScore)
+    .slice(0, limit);
+}
+
+function compareBaseShortcutScore(a, b) {
+  if (b.visitCount !== a.visitCount) {
+    return b.visitCount - a.visitCount;
+  }
+
+  if (b.lastVisitTime !== a.lastVisitTime) {
+    return b.lastVisitTime - a.lastVisitTime;
+  }
+
+  return b.dateAdded - a.dateAdded;
+}
+
+function prepareShortcutForDisplay(item) {
+  const hasClearedBaseline = Object.prototype.hasOwnProperty.call(
+    shortcutPreferences.cleared,
+    item.domainKey
+  );
+  const clearedBaseVisitCount = hasClearedBaseline ? shortcutPreferences.cleared[item.domainKey] : 0;
+  const adjustedVisitCount = Math.max(0, item.visitCount - clearedBaseVisitCount);
+  const isPinned = Boolean(shortcutPreferences.pinned[item.domainKey]);
+  const orderIndex = shortcutPreferences.order.indexOf(item.domainKey);
+  const adjustedLastVisitTime =
+    hasClearedBaseline && adjustedVisitCount === 0 ? 0 : item.lastVisitTime;
+
+  return {
+    ...item,
+    isPinned,
+    isCleared: hasClearedBaseline && adjustedVisitCount === 0,
+    orderIndex,
+    rawVisitCount: item.visitCount,
+    adjustedVisitCount,
+    adjustedLastVisitTime
+  };
+}
+
+function comparePreparedShortcutScore(a, b) {
+  if (a.isPinned !== b.isPinned) {
+    return Number(b.isPinned) - Number(a.isPinned);
+  }
+
+  const aHasManualOrder = a.orderIndex >= 0;
+  const bHasManualOrder = b.orderIndex >= 0;
+  if (aHasManualOrder !== bHasManualOrder) {
+    return Number(bHasManualOrder) - Number(aHasManualOrder);
+  }
+
+  if (aHasManualOrder && bHasManualOrder && a.orderIndex !== b.orderIndex) {
+    return a.orderIndex - b.orderIndex;
+  }
+
+  if (b.adjustedVisitCount !== a.adjustedVisitCount) {
+    return b.adjustedVisitCount - a.adjustedVisitCount;
+  }
+
+  if (b.adjustedLastVisitTime !== a.adjustedLastVisitTime) {
+    return b.adjustedLastVisitTime - a.adjustedLastVisitTime;
+  }
+
+  return compareBaseShortcutScore(a, b);
+}
+
+function loadShortcutPreferences() {
+  try {
+    const rawValue = window.localStorage.getItem(SHORTCUT_PREFERENCES_KEY);
+    if (!rawValue) {
+      return createDefaultShortcutPreferences();
+    }
+
+    return normalizeShortcutPreferences(JSON.parse(rawValue));
+  } catch (error) {
+    return createDefaultShortcutPreferences();
+  }
+}
+
+function createDefaultShortcutPreferences() {
+  return {
+    pinned: {},
+    cleared: {},
+    order: []
+  };
+}
+
+function normalizeShortcutPreferences(rawValue = {}) {
+  const defaultValue = createDefaultShortcutPreferences();
+  const pinned = {};
+  const cleared = {};
+
+  if (rawValue?.pinned && typeof rawValue.pinned === "object") {
+    for (const [key, value] of Object.entries(rawValue.pinned)) {
+      if (value && key) {
+        pinned[key] = true;
+      }
     }
   }
 
-  return uniqueShortcuts;
+  if (rawValue?.cleared && typeof rawValue.cleared === "object") {
+    for (const [key, value] of Object.entries(rawValue.cleared)) {
+      const nextValue = Number(value);
+      if (key && Number.isFinite(nextValue) && nextValue >= 0) {
+        cleared[key] = nextValue;
+      }
+    }
+  }
+
+  const order = Array.isArray(rawValue?.order)
+    ? [...new Set(rawValue.order.filter((item) => typeof item === "string" && item))]
+    : defaultValue.order;
+
+  return {
+    pinned,
+    cleared,
+    order
+  };
+}
+
+function saveShortcutPreferences() {
+  window.localStorage.setItem(SHORTCUT_PREFERENCES_KEY, JSON.stringify(shortcutPreferences));
+}
+
+function cloneShortcutPreferences(value) {
+  return normalizeShortcutPreferences(JSON.parse(JSON.stringify(value)));
+}
+
+function restoreShortcutPreferences(snapshot) {
+  shortcutPreferences = normalizeShortcutPreferences(snapshot);
+  saveShortcutPreferences();
+  topShortcuts = getTopBookmarkShortcuts(shortcutCandidates);
+  renderShortcuts();
+}
+
+function applyShortcutManualOrder(visibleKeys) {
+  const visibleKeySet = new Set(visibleKeys);
+  const remainingKeys = shortcutPreferences.order.filter((key) => !visibleKeySet.has(key));
+  shortcutPreferences.order = [...new Set([...visibleKeys, ...remainingKeys])];
+  saveShortcutPreferences();
+}
+
+function pruneShortcutPreferences(availableKeys) {
+  const nextPinned = {};
+  const nextCleared = {};
+
+  for (const key of Object.keys(shortcutPreferences.pinned)) {
+    if (availableKeys.has(key)) {
+      nextPinned[key] = true;
+    }
+  }
+
+  for (const [key, value] of Object.entries(shortcutPreferences.cleared)) {
+    if (availableKeys.has(key)) {
+      nextCleared[key] = value;
+    }
+  }
+
+  const nextOrder = shortcutPreferences.order.filter((key) => availableKeys.has(key));
+  const hasChanged =
+    JSON.stringify(nextPinned) !== JSON.stringify(shortcutPreferences.pinned) ||
+    JSON.stringify(nextCleared) !== JSON.stringify(shortcutPreferences.cleared) ||
+    JSON.stringify(nextOrder) !== JSON.stringify(shortcutPreferences.order);
+
+  if (!hasChanged) {
+    return;
+  }
+
+  shortcutPreferences = {
+    pinned: nextPinned,
+    cleared: nextCleared,
+    order: nextOrder
+  };
+  saveShortcutPreferences();
+}
+
+function loadRecentTabDismissals() {
+  try {
+    const rawValue = window.localStorage.getItem(RECENT_TAB_DISMISSALS_KEY);
+    if (!rawValue) {
+      return new Set();
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+    if (!Array.isArray(parsedValue)) {
+      return new Set();
+    }
+
+    return new Set(parsedValue.filter((item) => typeof item === "string" && item));
+  } catch (error) {
+    return new Set();
+  }
+}
+
+function saveRecentTabDismissals() {
+  window.localStorage.setItem(
+    RECENT_TAB_DISMISSALS_KEY,
+    JSON.stringify([...dismissedRecentTabKeys])
+  );
+}
+
+function pruneRecentTabDismissals(availableKeys) {
+  const nextDismissals = new Set(
+    [...dismissedRecentTabKeys].filter((dismissKey) => availableKeys.has(dismissKey))
+  );
+
+  const currentList = [...dismissedRecentTabKeys].sort();
+  const nextList = [...nextDismissals].sort();
+  if (JSON.stringify(currentList) === JSON.stringify(nextList)) {
+    return;
+  }
+
+  dismissedRecentTabKeys = nextDismissals;
+  saveRecentTabDismissals();
 }
 
 async function getBookmarkUsageMap() {
@@ -1747,8 +2244,85 @@ function getFaviconUrl(url) {
 }
 
 function showMessage(text, isError = false) {
-  message.textContent = text;
-  message.style.color = isError ? "#b64032" : "#a7551e";
+  if (!message) {
+    return;
+  }
+
+  if (!text) {
+    hideMessage();
+    return;
+  }
+
+  const isLoading = shouldKeepMessageVisible(text) && !isError;
+
+  if (isLoading) {
+    if (activeLoadingToast) {
+      updateMessageToast(activeLoadingToast, text, { isError: false, isLoading: true });
+      return;
+    }
+
+    activeLoadingToast = createMessageToast(text, { isError: false, isLoading: true });
+    return;
+  }
+
+  if (activeLoadingToast) {
+    removeMessageToast(activeLoadingToast);
+    activeLoadingToast = null;
+  }
+
+  const duration = isError ? 4000 : 2600;
+  const toast = createMessageToast(text, { isError, isLoading: false });
+  window.setTimeout(() => {
+    removeMessageToast(toast);
+  }, duration);
+}
+
+function hideMessage() {
+  if (!message) {
+    return;
+  }
+
+  if (activeLoadingToast) {
+    removeMessageToast(activeLoadingToast);
+    activeLoadingToast = null;
+  }
+
+  message.querySelectorAll(".message-toast").forEach((toast) => {
+    toast.remove();
+  });
+}
+
+function shouldKeepMessageVisible(text) {
+  const normalizedText = (text || "").trim();
+  return /^(正在|请稍等|加载中|刷新中)/.test(normalizedText);
+}
+
+function createMessageToast(text, options = {}) {
+  const { isError = false, isLoading = false } = options;
+  const toast = document.createElement("div");
+  toast.className = "message toast message-toast";
+  updateMessageToast(toast, text, { isError, isLoading });
+  message.appendChild(toast);
+  return toast;
+}
+
+function updateMessageToast(toast, text, options = {}) {
+  const { isError = false, isLoading = false } = options;
+  toast.textContent = text;
+  toast.classList.toggle("is-error", isError);
+  toast.classList.toggle("is-loading", isLoading);
+}
+
+function removeMessageToast(toast) {
+  if (!(toast instanceof HTMLElement) || !message.contains(toast)) {
+    return;
+  }
+
+  if (toast === activeLoadingToast) {
+    activeLoadingToast = null;
+  }
+
+  toast.remove();
 }
 
 function startUndoAction(action) {
@@ -1786,22 +2360,32 @@ function clearUndoAction(options = {}) {
 }
 
 function renderUndoToast() {
-  if (!undoToast || !undoToastText || !undoToastMeta || !undoToastButton) {
+  if (!message) {
     return;
   }
 
   if (!pendingUndoAction) {
-    undoToast.hidden = true;
-    undoToastButton.disabled = false;
+    removeUndoToast();
     return;
   }
 
   const remainingMs = Math.max(0, pendingUndoAction.expiresAt - Date.now());
   const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
-  undoToast.hidden = false;
-  undoToastText.textContent = pendingUndoAction.text;
-  undoToastMeta.textContent = `${remainingSeconds} 秒内可撤销`;
-  undoToastButton.disabled = undoInProgress;
+  if (!activeUndoToast) {
+    activeUndoToast = createUndoToast();
+  }
+
+  const textElement = activeUndoToast.querySelector(".undo-toast__text");
+  const metaElement = activeUndoToast.querySelector(".undo-toast__meta");
+  const buttonElement = activeUndoToast.querySelector(".undo-toast__btn");
+
+  if (!textElement || !metaElement || !buttonElement) {
+    return;
+  }
+
+  textElement.textContent = pendingUndoAction.text;
+  metaElement.textContent = `${remainingSeconds} 秒内可撤销`;
+  buttonElement.disabled = undoInProgress;
 }
 
 async function handleUndoLastAction() {
@@ -1823,6 +2407,44 @@ async function handleUndoLastAction() {
   } finally {
     undoInProgress = false;
   }
+}
+
+function createUndoToast() {
+  const toast = document.createElement("div");
+  toast.className = "undo-toast toast";
+
+  const content = document.createElement("div");
+  content.className = "undo-toast__content";
+
+  const text = document.createElement("p");
+  text.className = "undo-toast__text";
+
+  const meta = document.createElement("p");
+  meta.className = "undo-toast__meta";
+  meta.textContent = "10 秒内可撤销";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "undo-toast__btn";
+  button.textContent = "↶";
+  button.setAttribute("aria-label", "撤销上一步");
+  button.title = "撤销上一步";
+  button.addEventListener("click", handleUndoLastAction);
+
+  content.append(text, meta);
+  toast.append(content, button);
+  message.appendChild(toast);
+  return toast;
+}
+
+function removeUndoToast() {
+  if (!(activeUndoToast instanceof HTMLElement)) {
+    activeUndoToast = null;
+    return;
+  }
+
+  activeUndoToast.remove();
+  activeUndoToast = null;
 }
 
 function formatDate(timestamp) {
